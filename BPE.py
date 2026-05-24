@@ -84,7 +84,7 @@ print(target_token_embedding.size())
 
 context_length = max_length
 pos_embedding_layer = torch.nn.Embedding(context_length,output_dim)
-pos_embeddings = pos_embedding_layer(torch.arange(context_length))
+pos_embeddings = pos_embedding_layer(torch.arange(context_length)) # torch.arange array from 0,1,...,context_length-1
 print(pos_embeddings.size())
 # print(pos_embeddings)
 
