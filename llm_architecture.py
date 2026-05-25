@@ -314,9 +314,10 @@ GPT_2_MEDIUM = {
 "qkv_bias": False # Query-Key-Value bias
 }
 
-model_2 = GPTModel(GPT_2_MEDIUM)
-total_params_2 = sum(p.numel() for p in model_2.parameters())
-total_params_gpt2medium = (total_params_2 - sum(p.numel() for p in model_2.out_head.parameters()))
+#commented for training uncomment and test if required
+# model_2 = GPTModel(GPT_2_MEDIUM)
+# total_params_2 = sum(p.numel() for p in model_2.parameters())
+# total_params_gpt2medium = (total_params_2 - sum(p.numel() for p in model_2.out_head.parameters()))
 # print(f"{total_params_gpt2medium:,}")
 
 #gpt-2 large 
@@ -329,10 +330,10 @@ GPT_2_Large = {
 "drop_rate": 0.1, # Dropout rate
 "qkv_bias": False # Query-Key-Value bias
 }
-
-model_3 = GPTModel(GPT_2_Large)
-total_params_3 = sum(p.numel() for p in model_3.parameters())
-total_params_gpt2large = (total_params_3 - sum(p.numel() for p in model_3.out_head.parameters()))
+#commented for training uncomment and test if required
+# model_3 = GPTModel(GPT_2_Large)
+# total_params_3 = sum(p.numel() for p in model_3.parameters())
+# total_params_gpt2large = (total_params_3 - sum(p.numel() for p in model_3.out_head.parameters()))
 # print(f"{total_params_gpt2large:,}")
 
 #gpt 2 XL
@@ -346,7 +347,47 @@ GPT_2_XL = {
 "qkv_bias": False # Query-Key-Value bias
 }
 
-model_4 = GPTModel(GPT_2_XL)
-total_params_4= sum(p.numel() for p in model_4.parameters())
-total_params_gpt2XL = (total_params_4 - sum(p.numel() for p in model_4.out_head.parameters()))
+#commented for training uncomment and test if required
+# model_4 = GPTModel(GPT_2_XL)
+# total_params_4= sum(p.numel() for p in model_4.parameters())
+# total_params_gpt2XL = (total_params_4 - sum(p.numel() for p in model_4.out_head.parameters()))
 # print(f"{total_params_gpt2XL:,}")
+
+#Generating the text from the generated tokens
+#steps of converting the tokens back to text are below
+#1] extract the last vector from the output response which will correspond to the next token
+#2] convert the logits into probability distribution using the softmax function
+#3] Identify the index pos of the largest value which also represent the token ID
+#4] append the token to the previous inputs for the next round
+#simple class for generating the text from the generated logits output of the gpt model
+#model is calculating the most likely next token so it is called greedy decoding
+def generate_text_simple(model, idx, max_new_tokens, context_size) :
+    for _ in range(max_new_tokens) :
+        idx_cond = idx[:, -context_size:]
+        with torch.no_grad():
+            logits = model(idx_cond)
+        logits = logits[:,-1,:]
+        probas = torch.softmax(logits, dim=-1)
+        idx_next = torch.argmax(probas,dim=-1,keepdim=True)
+        idx = torch.cat((idx, idx_next), dim=-1)
+    
+    return idx
+
+start_context = "Hello, I am"
+encoded = tokenizer.encode(start_context)
+# print("ecoded:",encoded)
+encoded_tensor = torch.tensor(encoded).unsqueeze(0)
+# print("encoded tensor:",encoded_tensor)
+
+model.eval()
+out = generate_text_simple(
+    model=model,
+    idx = encoded_tensor,
+    max_new_tokens=8,
+    context_size=GPT_CONFIG_124M["context_length"]
+)
+# print("output:",out)
+# print("output length:", len(out[0]))
+
+decoded_text = tokenizer.decode(out.squeeze(0).tolist())
+# print("decoded_text:",decoded_text)

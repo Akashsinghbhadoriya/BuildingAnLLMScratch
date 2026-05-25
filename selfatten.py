@@ -114,13 +114,12 @@ class SelfAttention_v1(nn.Module) :
         #masking values above diagonal for causal attention masking using zeros
         context_length = keys.shape[0]
         mask_simple = torch.tril(torch.ones(context_length,context_length))
-        print(attn_weights)
-        print(mask_simple)
+        
         masked_simple = attn_weights * mask_simple
-        print(masked_simple)
+        
         row_sums = masked_simple.sum(dim=-1, keepdim=True)
         attn_weight = masked_simple / row_sums
-        print(attn_weight)
+        
 
         context_vect = attn_weights @ values
         return context_vect
@@ -144,9 +143,9 @@ class SelfAttention_v2(nn.Module) :
         context_length = keys.shape[0]
         mask = torch.triu(torch.ones(context_length,context_length), diagonal=1)
         masked = attn_scores.masked_fill(mask.bool(), -torch.inf)
-        print(masked)
+        
         attn_weights = torch.softmax(masked/keys.shape[-1]**0.5, dim=-1)
-        print(attn_weights)
+       
         
         context_vect = attn_weights @ values
         return context_vect
@@ -277,4 +276,4 @@ bs, cl, din = batch.shape
 dout = 2
 multi_head = MultiheadAttention(din,dout,cl,0.0,num_heads=2)
 c_v = multi_head(batch)
-print(c_v)
+# print(c_v)
