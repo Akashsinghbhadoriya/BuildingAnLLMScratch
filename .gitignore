@@ -2,3 +2,4 @@
 __pycache__/
 model.pth
 model_and_optimizer.pth
+gpt2/
