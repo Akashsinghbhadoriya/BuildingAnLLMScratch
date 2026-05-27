@@ -3,7 +3,7 @@ from pretraining import GPTModel
 import torch
 import numpy as np
 import tiktoken
-from pretraining import generate, text_to_token_ids, token_ids_to_text
+from pretraining import generate, text_to_token_ids, token_ids_to_text, create_dataloader_v1, calc_loss_loader
 
 
 # utility function for checking the dimensions
@@ -108,12 +108,50 @@ if __name__ == "__main__" :
     #testing the output with the loaded weights
     torch.manual_seed(123)
     tokenizer = tiktoken.get_encoding("gpt2")
-    token_ids = generate(
-        model = gpt,
-        idx = text_to_token_ids("Every effort moves you", tokenizer).to(device),
-        max_new_tokens=25,
-        context_size= NEW_CONFIG["context_length"],
-        top_k=50,
-        temperature=1.5
+    # token_ids = generate(
+    #     model = gpt,
+    #     idx = text_to_token_ids("Every effort moves you", tokenizer).to(device),
+    #     max_new_tokens=25,
+    #     context_size= NEW_CONFIG["context_length"],
+    #     top_k=50,
+    #     temperature=1.5
+    # )
+    # print("output text:\n",token_ids_to_text(token_ids, tokenizer))
+
+    with open("verdict.txt", "r", encoding="utf-8") as f:
+        text_data = f.read()
+
+    train_ratio = 0.9
+    split_idx = int(train_ratio * len(text_data))
+    train_data = text_data[:split_idx]
+    val_data = text_data[split_idx:]
+
+    torch.manual_seed(123)
+    train_loader = create_dataloader_v1(
+        train_data,
+        batch_size=2,
+        max_length=256,
+        stride=256,
+        drop_last=True,
+        shuffle=True,
+        num_workers=0
     )
-    print("output text:\n",token_ids_to_text(token_ids, tokenizer))
+
+    val_loader = create_dataloader_v1(
+        val_data,
+        batch_size=2,
+        max_length=256,
+        stride= 256,
+        drop_last=False,
+        shuffle=False,
+        num_workers=0
+    )
+
+    gpt.to(device)
+    with torch.no_grad():
+        train_loss = calc_loss_loader(train_loader,gpt,device)
+        val_loss = calc_loss_loader(val_loader,gpt,device)
+
+    print("training loss:",train_loss)
+    print("validation loss:",val_loss)
+

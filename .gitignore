@@ -3,3 +3,8 @@ __pycache__/
 model.pth
 model_and_optimizer.pth
 gpt2/
+sms_spam_collection/
+sms_spam_collection.zip
+test.csv
+train.csv
+validation.csv
