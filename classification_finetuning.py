@@ -6,6 +6,8 @@ import tiktoken
 from gpt_download import download_and_load_gpt2
 from loading_gpt2 import load_weights_into_gpt
 from pretraining import GPTModel
+import time
+import matplotlib.pyplot as plt
 
 #creating a balanced dataset using the data where the spam and not spam are equal
 def create_balanced_dataset(df):
@@ -86,6 +88,152 @@ class SpamDataset(Dataset):
             if encoded_len > max_length:
                 max_length = encoded_len
         return max_length
+    
+#calculating the classification accuracy
+def calc_accuracy_loader(data_loader, model, device, num_batches=None):
+    model.eval()
+    correct_predictions, num_examples = 0, 0
+
+    if num_batches is None:
+        num_batches = len(data_loader)
+    else:
+        num_batches = min(num_batches, len(data_loader))
+
+    for i, (input_batch, target_batch) in enumerate(data_loader):
+        if i < num_batches:
+            input_batch = input_batch.to(device)
+            target_batch = target_batch.to(device)
+
+            with torch.no_grad():
+                logits = model(input_batch)[:,-1,:]
+
+            predicted_labels = torch.argmax(logits, dim=-1)
+
+            num_examples += predicted_labels.shape[0]
+            correct_predictions += ((predicted_labels == target_batch).sum().item())
+
+        else:
+            break
+    return correct_predictions / num_examples
+
+#classification loss for a single batch
+def calc_loss_batch(input_batch, target_batch, model, device):
+    input_batch = input_batch.to(device)
+    target_batch = target_batch.to(device)
+    logits = model(input_batch)[:,-1,:]
+    loss = torch.nn.functional.cross_entropy(logits, target_batch)
+    return loss
+
+# classification loss loader for multiple batches
+def calc_loss_loader(data_loader, model, device, num_batches=None):
+    total_loss = 0
+    if len(data_loader) == 0:
+        return float("nan")
+    elif num_batches is None:
+        num_batches = len(data_loader)
+    else:
+        num_batches = min(num_batches, len(data_loader))
+    
+    for i, (input_batch, target_batch) in enumerate(data_loader):
+        if i < num_batches:
+            loss = calc_loss_batch(input_batch,target_batch,model,device)
+            total_loss += loss
+        else:
+            break
+
+    return total_loss / num_batches
+
+#Finetuning the gpt 2 model to work as a classifier
+def train_classfier_simple(
+        model, train_loader, val_loader, optimizer, device,
+        num_epochs, eval_freq, eval_iter
+):
+    train_losses, val_losses, train_accs, val_accs = [], [], [], []
+    examples_seen, global_step = 0, -1
+
+    for epoch in range(num_epochs):
+        model.train()
+
+        for input_batch, target_batch in train_loader:
+            optimizer.zero_grad()
+            loss = calc_loss_batch(input_batch, target_batch, model, device)
+            loss.backward()
+            optimizer.step()
+            examples_seen += input_batch.shape[0]
+            global_step += 1
+
+            if global_step % eval_freq == 0:
+                train_loss, val_loss = evaluate_model(
+                    model, train_loader, val_loader, device, eval_iter
+                )
+                train_losses.append(train_loss)
+                val_losses.append(val_loss)
+                print(f"Ep {epoch+1} (Step {global_step:06d}): "
+                    f"Train loss {train_loss:.3f}, "
+                    f"Val loss {val_loss:.3f}"
+                )
+        
+        train_accuracy = calc_accuracy_loader(train_loader, model, device, num_batches=eval_iter)
+        val_accuracy = calc_accuracy_loader(val_loader, model, device, num_batches=eval_iter)
+        print(f"Training accuracy: {train_accuracy*100:.2f}% | ", end="")
+        print(f"Validation accuracy: {val_accuracy*100:.2f}%")
+
+        train_accs.append(train_accuracy)
+        val_accs.append(val_accuracy)
+
+    return train_losses, val_losses, train_accs, val_accs, examples_seen
+
+def evaluate_model(model, train_loader, val_loader, device, eval_iter):
+    model.eval()
+    with torch.no_grad():
+        train_loss = calc_loss_loader(train_loader, model, device, num_batches=eval_iter)
+        val_loss = calc_loss_loader(val_loader, model, device, num_batches=eval_iter)
+
+    model.train()
+    return train_loss, val_loss
+
+#plotting the classification loss 
+def plot_values(
+    epochs_seen, examples_seen, train_values, val_values,
+    label="loss"):
+        fig, ax1 = plt.subplots(figsize=(5, 3))
+        #1
+        ax1.plot(epochs_seen, train_values, label=f"Training {label}")
+        ax1.plot(
+        epochs_seen, val_values, linestyle="-.",
+        label=f"Validation {label}"
+        )
+        ax1.set_xlabel("Epochs")
+        ax1.set_ylabel(label.capitalize())
+        ax1.legend()
+        #2
+        ax2 = ax1.twiny()
+        ax2.plot(examples_seen, train_values, alpha=0) #3
+        ax2.set_xlabel("Examples seen")
+        fig.tight_layout() #4
+        plt.savefig(f"{label}-plot.pdf")
+        plt.show()
+
+#classification of new texts using the finetuned gpt model
+def classify_review(text, model, tokenizer, device, max_length=None, pad_token_id=50256):
+    model.eval()
+
+    input_ids = tokenizer.encode(text)
+    supported_context_length = model.pos_emb.weight.shape[1]
+
+    input_ids = input_ids[: min(max_length, supported_context_length)]
+
+    input_ids += [pad_token_id] * (max_length - len(input_ids))
+
+    input_tensor = torch.tensor(
+        input_ids, device=device
+    ).unsqueeze(0)
+
+    with torch.no_grad():
+        logits = model(input_tensor)[:,-1,:]
+    predicted_label = torch.argmax(logits,dim=-1).item()
+
+    return "spam" if predicted_label == 1 else "not spam"
 
 if __name__ == "__main__" :
     extracted_path = "sms_spam_collection"
@@ -210,6 +358,79 @@ if __name__ == "__main__" :
     for param in model.final_norm.parameters():
         param.requires_grad = True
 
-    
+    #testing the classfier before training
+    inputs = tokenizer.encode("Do you have time")
+    inputs = torch.tensor(inputs).unsqueeze(0)
+    print("Inputs dimensions:", inputs.shape)
 
+    with torch.no_grad():
+        outputs = model(inputs)
 
+    print("outputs:\n",outputs)
+    print("outputs dimensions:", outputs.shape)
+
+    #we will be using the last token as it has the compelete idead of the text before it because of self attention
+    print("last output token:",outputs[:,-1,:])
+
+    probas = torch.softmax(outputs[:,-1,:], dim=-1)
+    label = torch.argmax(probas)
+    print("Class label:", label.item())
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.to(device)
+
+    torch.manual_seed(123)
+    train_accuracy = calc_accuracy_loader(train_loader, model, device, num_batches=10)
+    val_accuracy = calc_accuracy_loader(val_loader, model, device, num_batches=10)
+    test_accuracy = calc_accuracy_loader(test_loader, model, device, num_batches=10)
+
+    print(f"Training accuracy: {train_accuracy*100:.2f}%")
+    print(f"Validation accuracy: {val_accuracy*100:.2f}%")
+    print(f"Test accuracy: {test_accuracy*100:.2f}%")
+
+    with torch.no_grad():
+        train_loss = calc_loss_loader(train_loader, model, device, num_batches=5)
+        val_loss = calc_loss_loader(val_loader, model,device, num_batches=5)
+        test_loss = calc_loss_loader(test_loader, model, device, num_batches=5)
+
+    print(f"Training loss: {train_loss:.3f}")
+    print(f"Validation loss: {val_loss:.3f}")
+    print(f"Test loss: {test_loss:.3f}")
+
+    # fine tuning the gpt model for classification tasks using train_classfier_simple function
+
+    start_time = time.time()
+    torch.manual_seed(123)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=5e-5, weight_decay=0.1)
+    num_epochs = 5
+
+    train_losses, val_losses, train_acc, val_acc , examples_seen = train_classfier_simple(
+        model, train_loader, val_loader, optimizer, device,
+        num_epochs=num_epochs, eval_freq=50, eval_iter=5
+    )
+
+    end_time = time.time()
+    execution_time_min = (end_time - start_time) / 60
+    print(f"Training complete in {execution_time_min:.2f} minutes.")
+
+    epochs_tensor = torch.linspace(0, num_epochs, len(train_losses))
+    examples_seen_tensor = torch.linspace(0, examples_seen, len(train_losses))
+    plot_values(epochs_tensor, examples_seen_tensor, train_losses, val_losses)
+
+    epochs_tensor = torch.linspace(0, num_epochs, len(train_acc))
+    examples_seen_tensor = torch.linspace(0, examples_seen, len(train_acc))
+    plot_values(
+    epochs_tensor, examples_seen_tensor, train_acc, val_acc,
+    label="accuracy"
+    )
+
+    #saving the generated model .pth is the convention for pytorch files
+    torch.save(model.state_dict(), "classifier.pth")
+
+    # saving the ADAMW optimizer is also important as it uses the historical data to adjust the learning rates without saving it the optimizer resets and the model may learn suboptimally
+    torch.save({
+        "model_state_dict": model.state_dict(),
+        "optimizer_state_dict":optimizer.state_dict(),
+        },
+        "model_and_optimizer_classfier.pth"
+    )

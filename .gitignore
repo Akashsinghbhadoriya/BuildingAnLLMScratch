@@ -8,3 +8,6 @@ sms_spam_collection.zip
 test.csv
 train.csv
 validation.csv
+classifier.pth
+model_and_optimizer_classfier.pth
+*.pdf
