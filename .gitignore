@@ -11,3 +11,7 @@ validation.csv
 classifier.pth
 model_and_optimizer_classfier.pth
 *.pdf
+instruction-data.json
+*.pth
+instruction-data-with-response.json
+.env

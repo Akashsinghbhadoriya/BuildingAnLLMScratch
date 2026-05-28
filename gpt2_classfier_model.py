@@ -33,5 +33,3 @@ text_2 = (
 print(classify_review(
 text_2, model, tokenizer, device, max_length=120
 ))
-
-
